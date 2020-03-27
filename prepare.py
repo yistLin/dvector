@@ -8,13 +8,11 @@ import argparse
 
 from tqdm import tqdm
 
-from modules.preprocess import Preprocessor
+from modules.audioprocessor import AudioProcessor
 
 
-def prepare(root_path, save_path, n_speakers, n_utterances):
+def prepare(root_path, save_path, n_speakers, n_utterances, min_frames):
     """Extract audio files from directories and turn them into spectrograms."""
-
-    prep = Preprocessor()
 
     spkr_dirs = os.listdir(root_path)
     assert len(spkr_dirs) >= n_speakers
@@ -42,7 +40,11 @@ def prepare(root_path, save_path, n_speakers, n_utterances):
                 break
 
             uttr_path = os.path.join(spkr_path, uttr)
-            uttr_spec = prep.file2spectrogram(uttr_path)
+            uttr_spec = AudioProcessor.file2spectrogram(uttr_path)
+
+            if len(uttr_spec) < min_frames:
+                continue
+
             uttr_list.append(uttr_spec)
 
             pbar.update(1)
@@ -69,6 +71,8 @@ def parse_args():
                         help="# of speakers")
     parser.add_argument("-m", "--n_utterances", default=10, type=int,
                         help="# of utterances per speaker")
+    parser.add_argument("--min_frames", default=64, type=int,
+                        help="minimum # of frames per utterance")
 
     return parser.parse_args()
 

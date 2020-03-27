@@ -19,8 +19,7 @@ def prepare(root_path, save_path, n_speakers, n_utterances, min_frames):
 
     spkr_list = []
 
-    pbar = tqdm(total=n_speakers * n_utterances)
-
+    obar = tqdm(total=n_speakers)
     for spkr in spkr_dirs:
 
         if len(spkr_list) == n_speakers:
@@ -34,6 +33,7 @@ def prepare(root_path, save_path, n_speakers, n_utterances, min_frames):
         if len(uttr_wavs) < n_utterances:
             continue
 
+        ibar = tqdm(total=n_utterances, leave=False)
         for uttr in uttr_wavs:
 
             if len(uttr_list) == n_utterances:
@@ -46,12 +46,17 @@ def prepare(root_path, save_path, n_speakers, n_utterances, min_frames):
                 continue
 
             uttr_list.append(uttr_spec)
+            ibar.update(1)
 
-            pbar.update(1)
+        ibar.close()
+
+        if len(uttr_list) < n_utterances:
+            continue
 
         spkr_list.append(uttr_list)
+        obar.update(1)
 
-    pbar.close()
+    obar.close()
 
     assert len(spkr_list) == n_speakers
 

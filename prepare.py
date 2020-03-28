@@ -5,82 +5,104 @@
 import os
 import pickle
 import argparse
-
-from tqdm import tqdm
+from multiprocessing import Pool
 
 from modules.audioprocessor import AudioProcessor
 
 
-def prepare(root_path, save_path, n_speakers, n_utterances, min_frames):
-    """Extract audio files from directories and turn them into spectrograms."""
+class SpeakerDirsWalker:
+    """Traverse through speaker directories."""
 
-    spkr_dirs = os.listdir(root_path)
-    assert len(spkr_dirs) >= n_speakers
+    def __init__(self, root_dir):
+        self.root_dir = root_dir
 
-    spkr_list = []
+        self.speaker_dirs = self.scan_root()
+        self.speaker_idx = -1
 
-    obar = tqdm(total=n_speakers)
-    for spkr in spkr_dirs:
+    def __iter__(self):
+        return self
 
-        if len(spkr_list) == n_speakers:
-            break
+    def __next__(self):
+        return self.next_speaker()
 
-        uttr_list = []
-        spkr_path = os.path.join(root_path, spkr)
-        uttr_ents = os.listdir(spkr_path)
-        uttr_wavs = list(filter(lambda x: x.endswith(".wav"), uttr_ents))
+    def scan_root(self):
+        """Scan for speaker directories."""
 
-        if len(uttr_wavs) < n_utterances:
-            continue
+        with os.scandir(self.root_dir) as entries:
+            names = [entry.name for entry in entries if entry.is_dir()]
 
-        ibar = tqdm(total=n_utterances, leave=False)
-        for uttr in uttr_wavs:
+        return [(name, os.path.join(self.root_dir, name)) for name in names]
 
-            if len(uttr_list) == n_utterances:
-                break
+    def next_speaker(self):
+        """Return next speaker directory path."""
 
-            uttr_path = os.path.join(spkr_path, uttr)
-            uttr_spec = AudioProcessor.file2spectrogram(uttr_path)
+        self.speaker_idx += 1
 
-            if len(uttr_spec) < min_frames:
+        if self.speaker_idx >= len(self.speaker_dirs):
+            raise StopIteration()
+
+        return self.speaker_dirs[self.speaker_idx]
+
+    def utterances(self, exts):
+        """Return list of path to utterances."""
+
+        _, spath = self.speaker_dirs[self.speaker_idx]
+        paths = [os.path.join(root, name)
+                 for root, _, files in os.walk(spath) for name in files]
+        filtered = list(filter(lambda x: x.split('.')[-1] in exts, paths))
+
+        return filtered
+
+
+def prepare(root_paths, save_dir, extensions):
+    """Extract audio files from directories and turn into spectrograms."""
+
+    assert os.path.isdir(save_dir)
+
+    n_speakers = 0
+    n_utterances = 0
+
+    for root_path in root_paths:
+
+        walker = SpeakerDirsWalker(root_path)
+
+        for sid, spath in walker:
+
+            paths = walker.utterances(extensions)[:6]
+
+            print(f"Collecting {len(paths):4d} utterances from {spath}")
+
+            n_speakers = n_speakers + (1 if len(paths) > 0 else 0)
+            n_utterances = n_utterances + len(paths)
+
+            if len(paths) == 0:
                 continue
 
-            uttr_list.append(uttr_spec)
-            ibar.update(1)
+            save_path = os.path.join(save_dir, f"s{n_speakers:04d}({sid}).pkl")
 
-        ibar.close()
+            with Pool(6) as pool:
+                specs = pool.map(AudioProcessor.file2spectrogram, paths)
 
-        if len(uttr_list) < n_utterances:
-            continue
+            with open(save_path, 'wb') as out_file:
+                pickle.dump(specs, out_file)
 
-        spkr_list.append(uttr_list)
-        obar.update(1)
-
-    obar.close()
-
-    assert len(spkr_list) == n_speakers
-
-    with open(save_path, 'wb') as out_file:
-        pickle.dump(spkr_list, out_file)
+    return n_speakers, n_utterances
 
 
 def parse_args():
     """Parse command-line arguments."""
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("root_path", type=str,
+    parser.add_argument("root_paths", nargs='+',
                         help="root directory of directories of speakers")
-    parser.add_argument("save_path", type=str,
-                        help="path to save processed object")
-    parser.add_argument("-n", "--n_speakers", default=10, type=int,
-                        help="# of speakers")
-    parser.add_argument("-m", "--n_utterances", default=10, type=int,
-                        help="# of utterances per speaker")
-    parser.add_argument("--min_frames", default=64, type=int,
-                        help="minimum # of frames per utterance")
+    parser.add_argument("-s", "--save_dir", type=str, required=True,
+                        help="path to the directory to save processed object")
+    parser.add_argument("-e", "--extensions", type=str, default="wav",
+                        help="file extensions to use")
 
     return parser.parse_args()
 
 
 if __name__ == "__main__":
-    prepare(**vars(parse_args()))
+    N_SPEAKERS, N_UTTERANCES = prepare(**vars(parse_args()))
+    print(f"{N_UTTERANCES} utterances of {N_SPEAKERS} speakers collected.")

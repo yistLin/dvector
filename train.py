@@ -57,7 +57,7 @@ class TrainingManager:
         self.d_emb = 128
         self.steps = 0
 
-        writer = SummaryWriter()
+        writer = SummaryWriter(model_dir)
         dataset = Utterances(data_dir, n_utterances, seg_len)
         loader = DataLoader(dataset, batch_size=n_speakers, shuffle=True,
                             collate_fn=pad_batch, drop_last=True)

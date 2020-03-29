@@ -18,7 +18,7 @@ class AudioProcessor:
     max_db = 100
     fft_len = 1024
     hop_len = 256
-    mel_basis = mel(16000, 1024, fmin=90, fmax=7600, n_mels=80).T
+    mel_basis = mel(sample_rate, fft_len, fmin=90, fmax=7600, n_mels=80).T
     min_level = np.exp(-100 / 20 * np.log(10))
 
     @classmethod

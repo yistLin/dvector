@@ -68,7 +68,7 @@ def prepare(root_paths, save_dir, extensions):
 
         for sid, spath in walker:
 
-            paths = walker.utterances(extensions)[:6]
+            paths = walker.utterances(extensions)
 
             print(f"Collecting {len(paths):4d} utterances from {spath}")
 

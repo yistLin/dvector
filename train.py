@@ -44,91 +44,88 @@ def parse_args():
     return parser.parse_args()
 
 
-class TrainingManager:
-    """Manage the training process."""
+def train(data_dir, model_dir, checkpoint_path,
+          n_steps, save_every, decay_every, n_speakers, n_utterances, seg_len):
+    """Train a d-vector network."""
 
-    def __init__(self, data_dir, model_dir, checkpoint_path,
-                 n_steps, save_every, decay_every,
-                 n_speakers, n_utterances, seg_len):
+    # setup
+    dvector_init = {
+        'num_layers': 2,
+        'dim_input': 80,
+        'dim_cell': 256,
+        'dim_emb': 128,
+    }
+    total_steps = 0
 
-        self.n_lstms = 3
-        self.d_input = 80
-        self.d_cell = 256
-        self.d_emb = 128
-        self.steps = 0
+    # load data
+    dataset = Utterances(data_dir, n_utterances, seg_len)
+    loader = DataLoader(dataset, batch_size=n_speakers, shuffle=True,
+                        collate_fn=pad_batch, drop_last=True)
+    loader_iter = iter(loader)
+    print(f"Training starts with {len(dataset)} speakers.")
 
-        writer = SummaryWriter(model_dir)
-        dataset = Utterances(data_dir, n_utterances, seg_len)
-        loader = DataLoader(dataset, batch_size=n_speakers, shuffle=True,
-                            collate_fn=pad_batch, drop_last=True)
+    # load checkpoint
+    ckpt = None
+    if checkpoint_path is not None:
+        ckpt = torch.load(checkpoint_path)
+        dvector_init.update(ckpt["dvector_init"])
 
-        print(f"Training starts with {len(dataset)} speakers.")
+    # build network and training tools
+    dvector = DVector(**dvector_init)
+    criterion = GE2ELoss()
+    optimizer = SGD(dvector.parameters(), lr=0.01)
+    scheduler = StepLR(optimizer, step_size=decay_every, gamma=0.5)
+    if ckpt is not None:
+        total_steps = ckpt["total_steps"]
+        dvector.load_state_dict(ckpt["state_dict"])
+        criterion.load_state_dict(ckpt["criterion"])
+        optimizer.load_state_dict(ckpt["optimizer"])
+        scheduler.load_state_dict(ckpt["scheduler"])
 
-        ckpt = None
-        if checkpoint_path is not None:
-            ckpt = torch.load(checkpoint_path)
-            self.__dict__.update(ckpt["manager"])
+    # prepare for training
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    dvector = dvector.to(device)
+    criterion = criterion.to(device)
+    writer = SummaryWriter(model_dir)
+    pbar = tqdm.trange(n_steps)
 
-        dvector = DVector(self.n_lstms, self.d_input, self.d_cell, self.d_emb)
-        criterion = GE2ELoss()
-        optimizer = SGD(dvector.parameters(), lr=0.01)
-        scheduler = StepLR(optimizer, step_size=decay_every, gamma=0.5)
+    # start training
+    for step in pbar:
 
-        if ckpt is not None:
-            dvector.load_state_dict(ckpt["state_dict"])
-            criterion.load_state_dict(ckpt["criterion"])
-            optimizer.load_state_dict(ckpt["optimizer"])
-            scheduler.load_state_dict(ckpt["scheduler"])
+        total_steps += 1
 
-        self.train(n_steps, save_every, model_dir, n_speakers, n_utterances,
-                   loader, writer, dvector, criterion, optimizer, scheduler)
+        try:
+            batch = next(loader_iter)
+        except StopIteration:
+            loader_iter = iter(loader)
+            batch = next(loader_iter)
 
-    def train(self, n_steps, save_every, model_dir, n_speakers, n_utterances,
-              loader, writer, dvector, criterion, optimizer, scheduler):
-        """Train the network."""
+        embd = dvector(batch.to(device)).view(n_speakers, n_utterances, -1)
 
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        dvector = dvector.to(device)
-        criterion = criterion.to(device)
+        loss = criterion(embd)
 
-        loader_iter = iter(loader)
-        pbar = tqdm.trange(n_steps)
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+        scheduler.step()
 
-        for step in pbar:
+        pbar.set_description(f"global = {total_steps}, loss = {loss:.4f}")
+        writer.add_scalar("GE2E Loss", loss, total_steps)
 
-            self.steps += 1
+        if (step + 1) % save_every == 0:
+            ckpt_path = os.path.join(model_dir, f"ckpt-{total_steps}.tar")
+            ckpt_dict = {
+                "total_steps": total_steps,
+                "dvector_init": dvector_init,
+                "state_dict": dvector.state_dict(),
+                "criterion": criterion.state_dict(),
+                "optimizer": optimizer.state_dict(),
+                "scheduler": scheduler.state_dict(),
+            }
+            torch.save(ckpt_dict, ckpt_path)
 
-            try:
-                batch = next(loader_iter)
-            except StopIteration:
-                loader_iter = iter(loader)
-                batch = next(loader_iter)
-
-            embd = dvector(batch.to(device)).view(n_speakers, n_utterances, -1)
-
-            loss = criterion(embd)
-
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-            scheduler.step()
-
-            pbar.set_description(f"global = {self.steps}, loss = {loss:.4f}")
-            writer.add_scalar("GE2E Loss", loss, self.steps)
-
-            if (step + 1) % save_every == 0:
-                ckpt_path = os.path.join(model_dir, f"ckpt-{self.steps}.tar")
-                ckpt_dict = {
-                    "manager": self.__dict__,
-                    "state_dict": dvector.state_dict(),
-                    "criterion": criterion.state_dict(),
-                    "optimizer": optimizer.state_dict(),
-                    "scheduler": scheduler.state_dict(),
-                }
-                torch.save(ckpt_dict, ckpt_path)
-
-        print("Training completed.")
+    print("Training completed.")
 
 
 if __name__ == "__main__":
-    TrainingManager(**vars(parse_args()))
+    train(**vars(parse_args()))

@@ -54,13 +54,14 @@ class SpeakerDirsWalker:
         return filtered
 
 
-def prepare(root_paths, save_dir, extensions):
+def prepare(root_paths, save_dir, extensions, n_threads):
     """Extract audio files from directories and turn into spectrograms."""
 
     assert os.path.isdir(save_dir)
 
     n_speakers = 0
     n_utterances = 0
+    extensions = extensions.split(",")
 
     for root_path in root_paths:
 
@@ -80,7 +81,7 @@ def prepare(root_paths, save_dir, extensions):
 
             save_path = os.path.join(save_dir, f"s{n_speakers:04d}({sid}).pkl")
 
-            with Pool(6) as pool:
+            with Pool(n_threads) as pool:
                 specs = pool.map(AudioProcessor.file2spectrogram, paths)
 
             with open(save_path, 'wb') as out_file:
@@ -99,6 +100,8 @@ def parse_args():
                         help="path to the directory to save processed object")
     parser.add_argument("-e", "--extensions", type=str, default="wav",
                         help="file extensions to use")
+    parser.add_argument("-t", "--n_threads", type=int, default=4,
+                        help="# of threads to use")
 
     return parser.parse_args()
 

@@ -2,6 +2,10 @@
 
 This is the PyTorch implementation of speaker embedding (d-vector) trained with GE2E loss.
 
+The original paper about GE2E loss could be found here: [Generalized End-to-End Loss for Speaker Verification](https://arxiv.org/abs/1710.10467)
+
+## Usage
+
 ### Prepare training data
 
 To use the script provided here, you have to organize your raw data in this way:
@@ -54,6 +58,12 @@ python train.py DATA_DIR MODEL_DIR \
     -l 128 \
     -c SAVED_CHECKPOINT
 ```
+
+## Results
+
+The dimension reduction result (using t-SNE) of some utterances from LibriSpeech.
+
+![TSNE result](images/tsne.png)
 
 ### Credits
 

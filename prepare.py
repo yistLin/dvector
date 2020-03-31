@@ -17,34 +17,30 @@ def prepare(root_paths, save_dir, extensions, n_threads):
     assert os.path.isdir(save_dir)
 
     n_speakers = 0
-    n_utterances = 0
-    extensions = extensions.split(",")
 
     for root_path in root_paths:
 
-        walker = DirsWalker(root_path)
+        walker = DirsWalker(root_path, extensions)
 
-        for sid, spath in walker:
+        for sdir in walker:
 
-            paths = walker.utterances(extensions)
+            paths = list(sdir)
 
-            print(f"Collecting {len(paths):4d} utterances from {spath}")
-
-            n_speakers = n_speakers + (1 if len(paths) > 0 else 0)
-            n_utterances = n_utterances + len(paths)
+            print(f"Collecting {len(paths):4d} utterances from {sdir.path}")
 
             if len(paths) == 0:
                 continue
 
-            save_path = os.path.join(save_dir, f"s{n_speakers:04d}({sid}).pkl")
+            n_speakers += 1
 
             with Pool(n_threads) as pool:
                 specs = pool.map(AudioProcessor.file2spectrogram, paths)
 
+            save_path = os.path.join(
+                save_dir, f"s{n_speakers:04d}({sdir.name}).pkl")
+
             with open(save_path, 'wb') as out_file:
                 pickle.dump(specs, out_file)
-
-    return n_speakers, n_utterances
 
 
 def parse_args():
@@ -64,5 +60,4 @@ def parse_args():
 
 
 if __name__ == "__main__":
-    N_SPEAKERS, N_UTTERANCES = prepare(**vars(parse_args()))
-    print(f"{N_UTTERANCES} utterances of {N_SPEAKERS} speakers collected.")
+    prepare(**vars(parse_args()))

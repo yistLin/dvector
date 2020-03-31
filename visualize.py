@@ -18,21 +18,19 @@ from modules.audioprocessor import AudioProcessor
 def visualize(root_path, result_path, checkpoint_path, extensions):
     """Visualize high-dimensional embeddings using t-SNE."""
 
-    walker = DirsWalker(root_path)
+    walker = DirsWalker(root_path, extensions)
     ckpt = torch.load(checkpoint_path)
-    extensions = extensions.split(",")
 
     uttrs = []
     sids = []
 
-    for sid, _ in walker:
+    for sdir in walker:
 
-        paths = walker.utterances(extensions)
         with Pool(4) as pool:
-            specs = pool.map(AudioProcessor.file2spectrogram, paths)
+            specs = pool.map(AudioProcessor.file2spectrogram, list(sdir))
 
         uttrs += specs
-        sids += [sid] * len(specs)
+        sids += [sdir.name] * len(specs)
 
     print("[INFO] utterances loaded.")
 

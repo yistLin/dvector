@@ -20,6 +20,9 @@ class DirsWalker:
         self.name_dirs = [(n, os.path.join(root_dir, n)) for n in names]
         self.idx = -1
 
+    def __len__(self):
+        return len(self.name_dirs)
+
     def __iter__(self):
         return self
 
@@ -41,7 +44,7 @@ class SubdirsWalker:
         self.name = dir_name
         self.path = dir_path
 
-        paths = [os.path.join(dir_path, name)
+        paths = [os.path.join(root, name)
                  for root, _, files in os.walk(dir_path) for name in files]
 
         self.uttr_paths = filter(lambda x: x.split('.')[-1] in exts, paths)

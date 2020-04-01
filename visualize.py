@@ -66,7 +66,7 @@ def visualize(root_path, result_path, checkpoint_path, extensions):
         x="dim-1",
         y="dim-2",
         hue="label",
-        palette=sns.color_palette(),
+        palette=sns.color_palette(n_colors=len(walker)),
         data=data,
         legend="full"
     )

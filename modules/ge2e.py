@@ -57,15 +57,13 @@ class GE2ELoss(nn.Module):
 
     def embed_loss_softmax(self, dvecs, cos_sim_matrix):
         """Calculate the loss on each embedding by taking softmax."""
-        N, M, _ = dvecs.shape
-        L = []
-        for j in range(N):
-            L_row = []
-            for i in range(M):
-                L_row.append(-F.log_softmax(cos_sim_matrix[j, i], 0)[j])
-            L_row = torch.stack(L_row)
-            L.append(L_row)
-        return torch.stack(L)
+        return torch.stack([
+            torch.stack([
+                -F.log_softmax(cos_sim_matrix[j, i], 0)[j]
+                for i in range(dvecs.size(1))
+            ])
+            for j in range(dvecs.size(0))
+        ])
 
     def embed_loss_contrast(self, dvecs, cos_sim_matrix):
         """Calculate the loss on each embedding by contrast loss."""

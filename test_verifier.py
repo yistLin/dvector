@@ -12,7 +12,7 @@ from tqdm import tqdm
 from torch.utils.data import DataLoader
 
 from modules.utterances import SVDataset, pad_batch_with_label
-from modules.dvector import DVector, SpeakerVerifier
+from modules.verifier import SpeakerVerifier
 
 
 def parse_args():

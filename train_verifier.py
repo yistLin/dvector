@@ -15,8 +15,9 @@ from torch.utils.data import Subset, DataLoader
 
 from tensorboardX import SummaryWriter
 
-from modules.utterances import Utterances, SVDataset, pad_batch, pad_batch_with_label
-from modules.dvector import DVector, SpeakerVerifier
+from modules.utterances import Utterances, SVDataset, pad_batch_with_label
+from modules.dvector import DVector
+from modules.verifier import SpeakerVerifier
 from modules.ge2e import GE2ELoss
 
 
@@ -30,7 +31,7 @@ def parse_args():
                         help="path to directory for saving checkpoints")
     parser.add_argument("-c", "--checkpoint_path", type=str, default=None,
                         help="path to load saved checkpoint")
-    parser.add_argument("-p", "--dvector_path", type=str, default=None,
+    parser.add_argument("-p", "--pretrained_dvector_path", type=str, default=None,
                         help="path to load pre-trained d-vector")
     parser.add_argument("-i", "--n_steps", type=int, default=1000000,
                         help="total # of steps")
@@ -40,24 +41,26 @@ def parse_args():
                         help="decay learning rate every [decay_every] steps")
     parser.add_argument("-l", "--seg_len", type=int, default=128,
                         help="length of the segment of an utterance")
+    parser.add_argument("-r", "--ratio", type=float, default=0.85,
+                        help="ratio of data used to train verifier")
 
     return parser.parse_args()
 
-def sample_index(index_range, p=0.85):
+def sample_index(index_range, p):
     return random.sample(range(index_range), k=int(index_range * p))
 
 
-def train(data_dir, model_dir, checkpoint_path, dvector_path,
-          n_steps, save_every, decay_every, seg_len):
+def train(data_dir, model_dir, checkpoint_path, pretrained_dvector_path,
+          n_steps, save_every, decay_every, seg_len, ratio):
     """Train speaker verifier"""
 
     # setup
     total_steps = 0
-    os.makedirs(model_dir, exist_ok=True)
+    assert os.path.isdir(model_dir)
 
     #load data
     dataset = SVDataset(data_dir, seg_len)
-    train_index = sample_index(len(dataset), 0.85)
+    train_index = sample_index(len(dataset), ratio)
     valid_index = [x for x in range(len(dataset)) if x not in train_index]
     train_set = Subset(dataset, train_index)
     valid_set = Subset(dataset, valid_index)
@@ -75,7 +78,7 @@ def train(data_dir, model_dir, checkpoint_path, dvector_path,
         dvector_path = ckpt["dvector_path"]
 
     # build network and training tools
-    model = SpeakerVerifier(dvector_path, dataset.total)
+    model = SpeakerVerifier(pretrained_dvector_path, dataset.total)
     criterion = nn.CrossEntropyLoss()
     optimizer = Adam(model.parameters())
     scheduler = StepLR(optimizer, step_size=decay_every, gamma=0.5)

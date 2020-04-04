@@ -42,7 +42,12 @@ class Utterances(Dataset):
         return [u[l:l+self.seg_len, :] for u, l in zip(uttrs, lefts)]
 
 class SVDataset(Dataset):
+    """dataset for speaker verification"""
+
     def __init__(self, data_dir, seg_len, evaluate=False):
+        """Args:
+            data_dir (str): path to the directory of pickle files.
+        """
         assert os.path.isdir(data_dir)
         self.seg_len = seg_len
         self.evaluate = evaluate

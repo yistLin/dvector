@@ -1,4 +1,6 @@
 """PyTorch implementation of GE2E loss"""
+from functools import lru_cache
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -40,18 +42,15 @@ class GE2ELoss(nn.Module):
 
         ctrds = dvecs.mean(dim=1)
         ctrd_expns = ctrds.unsqueeze(0).expand(n_spkr * n_uttr, n_spkr, d_embd)
-        ctrd_expns = ctrd_expns.view_as(dvec_expns)
+        ctrd_expns = ctrd_expns.reshape(-1, d_embd)
 
         dvec_rolls = torch.cat([dvecs[:, 1:, :], dvecs[:, :-1, :]], dim=1)
         dvec_excls = dvec_rolls.unfold(1, n_uttr-1, 1)
-        mean_excls = dvec_excls.mean(dim=-1)
+        mean_excls = dvec_excls.mean(dim=-1).reshape(-1, d_embd)
 
-        ctrd_excls = torch.stack([
-            torch.cat([ctrds[:s, :],
-                       mean_excls[s, u, :].unsqueeze(0),
-                       ctrds[s+1:, :]])
-            for s in range(n_spkr) for u in range(n_uttr)
-        ]).view_as(dvec_expns)
+        indices = _indices_to_replace(n_spkr, n_uttr)
+        ctrd_excls = ctrd_expns.index_copy(0, indices, mean_excls)
+        ctrd_excls = ctrd_excls.view_as(dvec_expns)
 
         return F.cosine_similarity(dvec_expns, ctrd_excls, 3, 1e-6)
 
@@ -88,3 +87,10 @@ class GE2ELoss(nn.Module):
         cos_sim_matrix = cos_sim_matrix * self.w + self.b
         L = self.embed_loss(dvecs, cos_sim_matrix)
         return L.sum()
+
+
+@lru_cache(maxsize=5)
+def _indices_to_replace(n_spkr, n_uttr):
+    indices = [(s * n_uttr + u) * n_spkr + s
+               for s in range(n_spkr) for u in range(n_uttr)]
+    return torch.cuda.LongTensor(indices)

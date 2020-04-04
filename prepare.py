@@ -11,11 +11,10 @@ from modules.dirswalker import DirsWalker
 from modules.audioprocessor import AudioProcessor
 
 
-def prepare(root_paths, save_dir, extensions, n_threads, save_by_file):
+def prepare(root_paths, save_dir, extensions, n_threads):
     """Extract audio files from directories and turn into spectrograms."""
 
-    # assert os.path.isdir(save_dir)
-    os.makedirs(save_dir, exist_ok=True)
+    assert os.path.isdir(save_dir)
 
     n_speakers = 0
 
@@ -37,17 +36,11 @@ def prepare(root_paths, save_dir, extensions, n_threads, save_by_file):
             with Pool(n_threads) as pool:
                 specs = pool.map(AudioProcessor.file2spectrogram, paths)
 
-            if save_by_file:
-                for spec, path in zip(specs, paths):
-                    save_path = os.path.join(save_dir, f"{path.replace('/', '_').replace('.wav', '')}.pkl")
-                    with open(save_path, 'wb') as out_file:
-                        pickle.dump([spec], out_file)
-            else:
-                save_path = os.path.join(
-                    save_dir, f"s{n_speakers:04d}({sdir.name}).pkl")
+            save_path = os.path.join(
+                save_dir, f"s{n_speakers:04d}({sdir.name}).pkl")
 
-                with open(save_path, 'wb') as out_file:
-                    pickle.dump(specs, out_file)
+            with open(save_path, 'wb') as out_file:
+                pickle.dump(specs, out_file)
 
 
 def parse_args():
@@ -62,8 +55,6 @@ def parse_args():
                         help="file extensions to use")
     parser.add_argument("-t", "--n_threads", type=int, default=4,
                         help="# of threads to use")
-    parser.add_argument("-f", "--save_by_file", action="store_true", default=False,
-                        help="save pickle data by file instead of speaker")
 
     return parser.parse_args()
 

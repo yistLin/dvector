@@ -1,6 +1,5 @@
 """Build a model for d-vector speaker embedding."""
 
-import torch
 import torch.nn as nn
 
 

@@ -3,9 +3,9 @@
 """Train speaker verifier with pre-trained d-vector."""
 
 import argparse
-
 import os
 import random
+
 import tqdm
 import torch
 import torch.nn as nn
@@ -15,10 +15,8 @@ from torch.utils.data import Subset, DataLoader
 
 from tensorboardX import SummaryWriter
 
-from modules.utterances import Utterances, SVDataset, pad_batch_with_label
-from modules.dvector import DVector
+from modules.sv_dataset import SVDataset, pad_batch_with_label
 from modules.verifier import SpeakerVerifier
-from modules.ge2e import GE2ELoss
 
 
 def parse_args():
@@ -46,6 +44,7 @@ def parse_args():
 
     return parser.parse_args()
 
+
 def sample_index(index_range, p):
     return random.sample(range(index_range), k=int(index_range * p))
 
@@ -58,16 +57,16 @@ def train(data_dir, model_dir, checkpoint_path, pretrained_dvector_path,
     total_steps = 0
     assert os.path.isdir(model_dir)
 
-    #load data
+    # load data
     dataset = SVDataset(data_dir, seg_len)
     train_index = sample_index(len(dataset), ratio)
     valid_index = [x for x in range(len(dataset)) if x not in train_index]
     train_set = Subset(dataset, train_index)
     valid_set = Subset(dataset, valid_index)
     train_loader = DataLoader(train_set, batch_size=1024, shuffle=True,
-                        collate_fn=pad_batch_with_label, drop_last=False)
+                              collate_fn=pad_batch_with_label, drop_last=False)
     valid_loader = DataLoader(valid_set, batch_size=2, shuffle=False,
-                        collate_fn=pad_batch_with_label, drop_last=False)
+                              collate_fn=pad_batch_with_label, drop_last=False)
     train_loader_iter = iter(train_loader)
     print(f"Training starts with {train_set.dataset.total} speakers.")
 
@@ -86,7 +85,7 @@ def train(data_dir, model_dir, checkpoint_path, pretrained_dvector_path,
         total_steps = ckpt["total_steps"]
         model.load_state_dict(ckpt["state_dict"])
         optimizer.load_state_dict(ckpt["optmizier"])
-        scheduler.load(ckpt["scheduler"])
+        scheduler.load_state_dict(ckpt["scheduler"])
 
     # prepare for traning
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -138,14 +137,17 @@ def train(data_dir, model_dir, checkpoint_path, pretrained_dvector_path,
                 with torch.no_grad():
                     logits = model(data.to(device))
                     pred = logits.argmax(dim=1)
-                    val_acc += (pred == torch.LongTensor(label).to(device)).sum().item()
-                    val_loss += criterion(logits, torch.LongTensor(label).to(device)).item()
+                    val_acc += (pred ==
+                                torch.LongTensor(label).to(device)).sum().item()
+                    val_loss += criterion(logits,
+                                          torch.LongTensor(label).to(device)).item()
             val_acc /= len(valid_set)
             val_loss /= len(valid_loader)
             writer.add_scalar("valid_accuracy", val_acc, total_steps)
             writer.add_scalar("valid_loss", val_loss, total_steps)
 
     print("Training completed.")
+
 
 if __name__ == "__main__":
     torch.backends.cudnn.benchmark = True

@@ -40,7 +40,7 @@ class GE2ELoss(nn.Module):
         dvec_expns = dvecs.unsqueeze(-1).expand(n_spkr, n_uttr, d_embd, n_spkr)
         dvec_expns = dvec_expns.transpose(2, 3)
 
-        ctrds = dvecs.mean(dim=1)
+        ctrds = dvecs.mean(dim=1).to(dvecs.device)
         ctrd_expns = ctrds.unsqueeze(0).expand(n_spkr * n_uttr, n_spkr, d_embd)
         ctrd_expns = ctrd_expns.reshape(-1, d_embd)
 
@@ -48,7 +48,7 @@ class GE2ELoss(nn.Module):
         dvec_excls = dvec_rolls.unfold(1, n_uttr-1, 1)
         mean_excls = dvec_excls.mean(dim=-1).reshape(-1, d_embd)
 
-        indices = _indices_to_replace(n_spkr, n_uttr)
+        indices = _indices_to_replace(n_spkr, n_uttr).to(dvecs.device)
         ctrd_excls = ctrd_expns.index_copy(0, indices, mean_excls)
         ctrd_excls = ctrd_excls.view_as(dvec_expns)
 
@@ -57,7 +57,7 @@ class GE2ELoss(nn.Module):
     def embed_loss_softmax(self, dvecs, cos_sim_matrix):
         """Calculate the loss on each embedding by taking softmax."""
         n_spkr, n_uttr, _ = dvecs.size()
-        indices = _indices_to_replace(n_spkr, n_uttr)
+        indices = _indices_to_replace(n_spkr, n_uttr).to(dvecs.device)
         losses = -F.log_softmax(cos_sim_matrix, 2)
         return losses.flatten().index_select(0, indices).view(n_spkr, n_uttr)
 
@@ -71,8 +71,8 @@ class GE2ELoss(nn.Module):
                 centroids_sigmoids = torch.sigmoid(cos_sim_matrix[j, i])
                 excl_centroids_sigmoids = torch.cat(
                     (centroids_sigmoids[:j], centroids_sigmoids[j+1:]))
-                L_row.append(
-                    1. - torch.sigmoid(cos_sim_matrix[j, i, j]) + torch.max(excl_centroids_sigmoids))
+                L_row.append(1. - torch.sigmoid(cos_sim_matrix[j, i, j]) +
+                             torch.max(excl_centroids_sigmoids))
             L_row = torch.stack(L_row)
             L.append(L_row)
         return torch.stack(L)
@@ -90,4 +90,4 @@ class GE2ELoss(nn.Module):
 def _indices_to_replace(n_spkr, n_uttr):
     indices = [(s * n_uttr + u) * n_spkr + s
                for s in range(n_spkr) for u in range(n_uttr)]
-    return torch.cuda.LongTensor(indices)
+    return torch.LongTensor(indices)

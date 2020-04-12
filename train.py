@@ -13,7 +13,7 @@ from torch.utils.data import DataLoader
 
 from tensorboardX import SummaryWriter
 
-from modules.utterances import Utterances, pad_batch
+from modules.se_dataset import SEDataset, pad_batch
 from modules.dvector import DVector
 from modules.ge2e import GE2ELoss
 
@@ -22,8 +22,10 @@ def parse_args():
     """Parse command-line arguments."""
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("data_dir", type=str,
-                        help="path to directory of processed utterances")
+    parser.add_argument("train_dir", type=str,
+                        help="path to directory of training data.")
+    parser.add_argument("valid_dir", type=str,
+                        help="path to directory of validation data.")
     parser.add_argument("model_dir", type=str,
                         help="path to directory for saving checkpoints")
     parser.add_argument("-c", "--checkpoint_path", type=str, default=None,
@@ -31,7 +33,9 @@ def parse_args():
     parser.add_argument("-i", "--n_steps", type=int, default=1000000,
                         help="total # of steps")
     parser.add_argument("-s", "--save_every", type=int, default=10000,
-                        help="save model every [save_every] epochs")
+                        help="save model every [save_every] steps")
+    parser.add_argument("-t", "--test_every", type=int, default=100,
+                        help="test on validation set every [test_every] steps")
     parser.add_argument("-d", "--decay_every", type=int, default=100000,
                         help="decay learning rate every [decay_every] steps")
     parser.add_argument("-n", "--n_speakers", type=int, default=32,
@@ -44,25 +48,35 @@ def parse_args():
     return parser.parse_args()
 
 
-def train(data_dir, model_dir, checkpoint_path,
-          n_steps, save_every, decay_every, n_speakers, n_utterances, seg_len):
+def train(train_dir, valid_dir, model_dir, checkpoint_path,
+          n_steps, save_every, test_every, decay_every,
+          n_speakers, n_utterances, seg_len):
     """Train a d-vector network."""
 
     # setup
     dvector_init = {
         'num_layers': 2,
         'dim_input': 80,
-        'dim_cell': 256,
-        'dim_emb': 128,
+        'dim_cell': 768,
+        'dim_emb': 256,
     }
     total_steps = 0
 
     # load data
-    dataset = Utterances(data_dir, n_utterances, seg_len)
-    loader = DataLoader(dataset, batch_size=n_speakers, shuffle=True,
-                        collate_fn=pad_batch, drop_last=True)
-    loader_iter = iter(loader)
-    print(f"Training starts with {len(dataset)} speakers.")
+    train_set = SEDataset(train_dir, n_utterances, seg_len)
+    valid_set = SEDataset(valid_dir, n_utterances, seg_len)
+    train_loader = DataLoader(train_set, batch_size=n_speakers,
+                              shuffle=True, num_workers=2,
+                              collate_fn=pad_batch, drop_last=True)
+    valid_loader = DataLoader(valid_set, batch_size=n_speakers,
+                              shuffle=True, num_workers=2,
+                              collate_fn=pad_batch, drop_last=True)
+    train_iter = iter(train_loader)
+
+    assert len(train_set) >= n_speakers
+    assert len(valid_set) >= n_speakers
+    print(f"Training starts with {len(train_set)} speakers. "
+          f"(and {len(valid_set)} speakers for validation)")
 
     # load checkpoint
     ckpt = None
@@ -95,10 +109,10 @@ def train(data_dir, model_dir, checkpoint_path,
         total_steps += 1
 
         try:
-            batch = next(loader_iter)
+            batch = next(train_iter)
         except StopIteration:
-            loader_iter = iter(loader)
-            batch = next(loader_iter)
+            train_iter = iter(train_loader)
+            batch = next(train_iter)
 
         embd = dvector(batch.to(device)).view(n_speakers, n_utterances, -1)
 
@@ -110,7 +124,13 @@ def train(data_dir, model_dir, checkpoint_path,
         scheduler.step()
 
         pbar.set_description(f"global = {total_steps}, loss = {loss:.4f}")
-        writer.add_scalar("GE2E Loss", loss, total_steps)
+        writer.add_scalar("training Loss", loss, total_steps)
+
+        if (step + 1) % test_every == 0:
+            batch = next(iter(valid_loader))
+            embd = dvector(batch.to(device)).view(n_speakers, n_utterances, -1)
+            loss = criterion(embd)
+            writer.add_scalar("validation loss", loss, total_steps)
 
         if (step + 1) % save_every == 0:
             ckpt_path = os.path.join(model_dir, f"ckpt-{total_steps}.tar")

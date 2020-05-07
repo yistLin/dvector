@@ -56,9 +56,9 @@ def train(train_dir, valid_dir, model_dir, checkpoint_path,
     # setup
     dvector_init = {
         'num_layers': 2,
-        'dim_input': 80,
-        'dim_cell': 768,
-        'dim_emb': 256,
+        'dim_input': 40,
+        'dim_cell': 256,
+        'dim_emb': 128,
     }
     total_steps = 0
 

@@ -67,4 +67,4 @@ The dimension reduction result (using t-SNE) of some utterances from LibriSpeech
 
 ### Credits
 
-The GE2E-Loss module is borrowed from [cvqluu/GE2E-Loss](https://github.com/cvqluu/GE2E-Loss).
+The GE2E-Loss module is first borrowed from [cvqluu/GE2E-Loss](https://github.com/cvqluu/GE2E-Loss) and then rewritten and optimized for speed by myself.

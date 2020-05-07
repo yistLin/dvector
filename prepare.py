@@ -3,17 +3,16 @@
 """Preprocess audio files."""
 
 from argparse import ArgumentParser
-from multiprocessing import Pool
 from os import listdir, makedirs
 from os.path import basename, isdir, join as join_path, splitext
 
-from numpy import save as save_npy
+import torch
 from librosa.util import find_files as find_audio_files
 
-from modules.audioprocessor import AudioProcessor
+from modules.audiotoolkit import AudioToolkit
 
 
-def prepare(root_paths, save_dir, n_threads):
+def prepare(root_paths, save_dir):
     """Extract audio files from directories and turn into spectrograms."""
 
     assert isdir(save_dir)
@@ -42,11 +41,11 @@ def prepare(root_paths, save_dir, n_threads):
 
             makedirs(specs_path)
 
-            with Pool(n_threads) as pool:
-                specs = pool.map(AudioProcessor.file2spectrogram, uttr_paths)
+            with torch.no_grad():
+                specs = [AudioToolkit.file_to_mel(u) for u in uttr_paths]
 
             for spec, uttr_id in zip(specs, uttr_ids):
-                save_npy(join_path(specs_path, uttr_id), spec)
+                torch.save(spec, join_path(specs_path, uttr_id + '.pt'))
 
 
 def parse_args():
@@ -57,8 +56,6 @@ def parse_args():
                         help="root directory of directories of speakers")
     parser.add_argument("-s", "--save_dir", type=str, required=True,
                         help="path to the directory to save processed object")
-    parser.add_argument("-t", "--n_threads", type=int, default=4,
-                        help="# of threads to use")
 
     return parser.parse_args()
 

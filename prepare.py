@@ -2,20 +2,20 @@
 # -*- coding: utf-8 -*-
 """Preprocess audio files."""
 
-from argparse import ArgumentParser
+import argparse
 from os import listdir, makedirs
-from os.path import basename, isdir, join as join_path, splitext
+from os.path import basename, isdir, splitext, join as join_path
 
 import torch
-from librosa.util import find_files as find_audio_files
+import librosa
 
 from modules.audiotoolkit import AudioToolkit
 
 
-def prepare(root_paths, save_dir):
+def prepare(root_paths, save_dir, config_path):
     """Extract audio files from directories and turn into spectrograms."""
 
-    assert isdir(save_dir)
+    audiotk = AudioToolkit.load_config_file(config_path)
 
     n_speakers = 0
 
@@ -27,7 +27,7 @@ def prepare(root_paths, save_dir):
 
         for spkr_id, spkr_path in zip(spkr_ids, spkr_paths):
 
-            uttr_paths = find_audio_files(spkr_path)
+            uttr_paths = librosa.util.find_files(spkr_path)
             uttr_ids = [splitext(basename(u))[0] for u in uttr_paths]
 
             print(f"Collecting {len(uttr_paths)} utterances from {spkr_path}")
@@ -42,7 +42,7 @@ def prepare(root_paths, save_dir):
             makedirs(specs_path)
 
             with torch.no_grad():
-                specs = [AudioToolkit.file_to_mel(u) for u in uttr_paths]
+                specs = [audiotk.file_to_mel_tensor(u) for u in uttr_paths]
 
             for spec, uttr_id in zip(specs, uttr_ids):
                 torch.save(spec, join_path(specs_path, uttr_id + '.pt'))
@@ -51,11 +51,13 @@ def prepare(root_paths, save_dir):
 def parse_args():
     """Parse command-line arguments."""
 
-    parser = ArgumentParser()
+    parser = argparse.ArgumentParser()
     parser.add_argument("root_paths", nargs='+',
                         help="root directory of directories of speakers")
     parser.add_argument("-s", "--save_dir", type=str, required=True,
                         help="path to the directory to save processed object")
+    parser.add_argument("-c", "--config_path", type=str, required=True,
+                        help="path to audio toolkit configuration")
 
     return parser.parse_args()
 

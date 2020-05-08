@@ -9,7 +9,7 @@ import tqdm
 import torch
 from torch.optim import SGD
 from torch.optim.lr_scheduler import StepLR
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, random_split
 
 from tensorboardX import SummaryWriter
 
@@ -24,8 +24,6 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("train_dir", type=str,
                         help="path to directory of training data.")
-    parser.add_argument("valid_dir", type=str,
-                        help="path to directory of validation data.")
     parser.add_argument("model_dir", type=str,
                         help="path to directory for saving checkpoints")
     parser.add_argument("-c", "--checkpoint_path", type=str, default=None,
@@ -34,7 +32,7 @@ def parse_args():
                         help="total # of steps")
     parser.add_argument("-s", "--save_every", type=int, default=10000,
                         help="save model every [save_every] steps")
-    parser.add_argument("-t", "--test_every", type=int, default=100,
+    parser.add_argument("-t", "--test_every", type=int, default=1000,
                         help="test on validation set every [test_every] steps")
     parser.add_argument("-d", "--decay_every", type=int, default=100000,
                         help="decay learning rate every [decay_every] steps")
@@ -48,7 +46,7 @@ def parse_args():
     return parser.parse_args()
 
 
-def train(train_dir, valid_dir, model_dir, checkpoint_path,
+def train(train_dir, model_dir, checkpoint_path,
           n_steps, save_every, test_every, decay_every,
           n_speakers, n_utterances, seg_len):
     """Train a d-vector network."""
@@ -63,13 +61,14 @@ def train(train_dir, valid_dir, model_dir, checkpoint_path,
     total_steps = 0
 
     # load data
-    train_set = SEDataset(train_dir, n_utterances, seg_len)
-    valid_set = SEDataset(valid_dir, n_utterances, seg_len)
+    dataset = SEDataset(train_dir, n_utterances, seg_len)
+    train_set, valid_set = random_split(dataset,
+                                        [len(dataset)-n_speakers, n_speakers])
     train_loader = DataLoader(train_set, batch_size=n_speakers,
-                              shuffle=True, num_workers=2,
+                              shuffle=True, num_workers=4,
                               collate_fn=pad_batch, drop_last=True)
     valid_loader = DataLoader(valid_set, batch_size=n_speakers,
-                              shuffle=True, num_workers=2,
+                              shuffle=True, num_workers=4,
                               collate_fn=pad_batch, drop_last=True)
     train_iter = iter(train_loader)
 

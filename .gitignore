@@ -4,3 +4,4 @@
 *.npy
 *.npz
 runs
+model-*

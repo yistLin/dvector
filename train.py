@@ -26,6 +26,8 @@ def parse_args():
                         help="path to directory of training data.")
     parser.add_argument("model_dir", type=str,
                         help="path to directory for saving checkpoints")
+    parser.add_argument("config_path", type=str,
+                        help="path to configuration of dvector")
     parser.add_argument("-c", "--checkpoint_path", type=str, default=None,
                         help="path to load saved checkpoint")
     parser.add_argument("-i", "--n_steps", type=int, default=1000000,
@@ -46,24 +48,18 @@ def parse_args():
     return parser.parse_args()
 
 
-def train(train_dir, model_dir, checkpoint_path,
+def train(train_dir, model_dir, config_path, checkpoint_path,
           n_steps, save_every, test_every, decay_every,
           n_speakers, n_utterances, seg_len):
     """Train a d-vector network."""
 
     # setup
-    dvector_init = {
-        'num_layers': 2,
-        'dim_input': 40,
-        'dim_cell': 256,
-        'dim_emb': 128,
-    }
     total_steps = 0
 
     # load data
     dataset = SEDataset(train_dir, n_utterances, seg_len)
-    train_set, valid_set = random_split(dataset,
-                                        [len(dataset)-n_speakers, n_speakers])
+    train_set, valid_set = random_split(dataset, [len(dataset)-2*n_speakers,
+                                                  2*n_speakers])
     train_loader = DataLoader(train_set, batch_size=n_speakers,
                               shuffle=True, num_workers=4,
                               collate_fn=pad_batch, drop_last=True)
@@ -77,18 +73,15 @@ def train(train_dir, model_dir, checkpoint_path,
     print(f"Training starts with {len(train_set)} speakers. "
           f"(and {len(valid_set)} speakers for validation)")
 
-    # load checkpoint
-    ckpt = None
-    if checkpoint_path is not None:
-        ckpt = torch.load(checkpoint_path)
-        dvector_init.update(ckpt["dvector_init"])
-
     # build network and training tools
-    dvector = DVector(**dvector_init)
+    dvector = DVector().load_config_file(config_path)
     criterion = GE2ELoss()
     optimizer = SGD(dvector.parameters(), lr=0.01)
     scheduler = StepLR(optimizer, step_size=decay_every, gamma=0.5)
-    if ckpt is not None:
+
+    # load checkpoint
+    if checkpoint_path is not None:
+        ckpt = torch.load(checkpoint_path)
         total_steps = ckpt["total_steps"]
         dvector.load_state_dict(ckpt["state_dict"])
         criterion.load_state_dict(ckpt["criterion"])
@@ -135,7 +128,6 @@ def train(train_dir, model_dir, checkpoint_path,
             ckpt_path = os.path.join(model_dir, f"ckpt-{total_steps}.tar")
             ckpt_dict = {
                 "total_steps": total_steps,
-                "dvector_init": dvector_init,
                 "state_dict": dvector.state_dict(),
                 "criterion": criterion.state_dict(),
                 "optimizer": optimizer.state_dict(),

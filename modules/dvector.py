@@ -1,5 +1,6 @@
 """Build a model for d-vector speaker embedding."""
 
+import yaml
 import torch.nn as nn
 
 
@@ -14,6 +15,15 @@ class DVector(nn.Module):
                             num_layers=num_layers,
                             batch_first=True)
         self.embedding = nn.Linear(dim_cell, dim_emb)
+
+    @classmethod
+    def load_config_file(cls, config_path):
+        """Init with given config."""
+
+        with open(config_path) as config_file:
+            configs = yaml.load(config_file, Loader=yaml.FullLoader)
+
+        return cls(**configs)
 
     def forward(self, x):
         """Forward data through network."""

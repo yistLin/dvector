@@ -3,40 +3,46 @@
 """Create perturbed utterances."""
 
 import argparse
-from multiprocessing import Pool
+from os import listdir
+from os.path import join as join_path
 
 import torch
+import librosa
 import seaborn as sns
 import matplotlib.pyplot as plt
 from sklearn.manifold import TSNE
 
-from modules.dirswalker import DirsWalker
 from modules.dvector import DVector
-from modules.audioprocessor import AudioProcessor
+from modules.audiotoolkit import AudioToolkit
 
 
-def visualize(root_path, result_path, checkpoint_path, extensions):
+def visualize(root_path, checkpoint_path, dvector_config_path,
+              toolkit_config_path, result_path):
     """Visualize high-dimensional embeddings using t-SNE."""
 
-    walker = DirsWalker(root_path, extensions)
     ckpt = torch.load(checkpoint_path)
+    dvector = DVector.load_config_file(dvector_config_path).cuda()
+    dvector.load_state_dict(ckpt["state_dict"])
+    dvector.eval()
+    audiotk = AudioToolkit.load_config_file(toolkit_config_path)
 
     uttrs = []
     sids = []
 
-    for sdir in walker:
+    spkr_ids = [entry for entry in listdir(root_path)]
+    spkr_paths = [join_path(root_path, spkr) for spkr in spkr_ids]
 
-        with Pool(4) as pool:
-            specs = pool.map(AudioProcessor.file2spectrogram, list(sdir))
+    for spkr_id, spkr_path in zip(spkr_ids, spkr_paths):
+
+        uttr_paths = librosa.util.find_files(spkr_path)
+
+        with torch.no_grad():
+            specs = [audiotk.file_to_mel_ndarray(u) for u in uttr_paths]
 
         uttrs += specs
-        sids += [sdir.name] * len(specs)
+        sids += [spkr_id] * len(specs)
 
     print("[INFO] utterances loaded.")
-
-    dvector = DVector(**ckpt["dvector_init"]).cuda()
-    dvector.load_state_dict(ckpt["state_dict"])
-    dvector.eval()
 
     print("[INFO] model loaded.")
 
@@ -66,7 +72,7 @@ def visualize(root_path, result_path, checkpoint_path, extensions):
         x="dim-1",
         y="dim-2",
         hue="label",
-        palette=sns.color_palette(n_colors=len(walker)),
+        palette=sns.color_palette(n_colors=len(spkr_ids)),
         data=data,
         legend="full"
     )
@@ -79,12 +85,14 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("root_path", type=str,
                         help="path to root directory of speaker directories")
+    parser.add_argument("checkpoint_path", type=str,
+                        help="path to saved model")
+    parser.add_argument("dvector_config_path", type=str,
+                        help="path to dvector configuration")
+    parser.add_argument("toolkit_config_path", type=str,
+                        help="path to toolkit configuration")
     parser.add_argument("result_path", type=str,
                         help="path to save plotted result")
-    parser.add_argument("-d", "--checkpoint_path", type=str,
-                        help="path to saved model")
-    parser.add_argument("-e", "--extensions", type=str, default="wav,flac",
-                        help="extensions of files to be extracted")
 
     return parser.parse_args()
 

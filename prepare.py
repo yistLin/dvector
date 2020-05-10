@@ -3,6 +3,7 @@
 """Preprocess audio files."""
 
 import argparse
+import random
 from os import listdir, makedirs
 from os.path import basename, isdir, splitext, join as join_path
 
@@ -12,7 +13,7 @@ import librosa
 from modules.audiotoolkit import AudioToolkit
 
 
-def prepare(root_paths, save_dir, config_path):
+def prepare(root_paths, save_dir, config_path, max_amount):
     """Extract audio files from directories and turn into spectrograms."""
 
     audiotk = AudioToolkit.load_config_file(config_path)
@@ -28,6 +29,10 @@ def prepare(root_paths, save_dir, config_path):
         for spkr_id, spkr_path in zip(spkr_ids, spkr_paths):
 
             uttr_paths = librosa.util.find_files(spkr_path)
+
+            if max_amount is not None and len(uttr_paths) > max_amount:
+                uttr_paths = random.choices(uttr_paths, k=max_amount)
+
             uttr_ids = [splitext(basename(u))[0] for u in uttr_paths]
 
             print(f"Collecting {len(uttr_paths)} utterances from {spkr_path}")
@@ -58,6 +63,8 @@ def parse_args():
                         help="path to the directory to save processed object")
     parser.add_argument("-c", "--config_path", type=str, required=True,
                         help="path to audio toolkit configuration")
+    parser.add_argument("-m", "--max_amount", type=int, default=None,
+                        help="maximum amount of utterances to be extracted")
 
     return parser.parse_args()
 

@@ -76,7 +76,8 @@ def train(train_dir, model_dir, config_path, checkpoint_path,
     # build network and training tools
     dvector = DVector().load_config_file(config_path)
     criterion = GE2ELoss()
-    optimizer = SGD(dvector.parameters(), lr=0.01)
+    optimizer = SGD(list(dvector.parameters()) +
+                    list(criterion.parameters()), lr=0.01)
     scheduler = StepLR(optimizer, step_size=decay_every, gamma=0.5)
 
     # load checkpoint
@@ -112,11 +113,19 @@ def train(train_dir, model_dir, config_path, checkpoint_path,
 
         optimizer.zero_grad()
         loss.backward()
+
+        grad_norm = torch.nn.utils.clip_grad_norm_(
+            list(dvector.parameters()) + list(criterion.parameters()), max_norm=3)
+        dvector.embedding.weight.grad.data *= 0.5
+        criterion.w.grad.data *= 0.01
+        criterion.b.grad.data *= 0.01
+
         optimizer.step()
         scheduler.step()
 
         pbar.set_description(f"global = {total_steps}, loss = {loss:.4f}")
-        writer.add_scalar("training Loss", loss, total_steps)
+        writer.add_scalar("Training loss", loss, total_steps)
+        writer.add_scalar("Gradient norm", grad_norm, total_steps)
 
         if (step + 1) % test_every == 0:
             batch = next(iter(valid_loader))

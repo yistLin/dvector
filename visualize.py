@@ -1,60 +1,77 @@
-#!python
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""Create perturbed utterances."""
+"""Visualize speaker embeddings."""
 
-import argparse
-from os import listdir
-from os.path import join as join_path
+from argparse import ArgumentParser
+from pathlib import Path
+from concurrent.futures import ProcessPoolExecutor
+from multiprocessing import cpu_count
+from warnings import filterwarnings
 
 import torch
-import librosa
 import seaborn as sns
 import matplotlib.pyplot as plt
 from sklearn.manifold import TSNE
+from librosa.util import find_files
+from tqdm import tqdm
 
-from modules.dvector import DVector
-from modules.audiotoolkit import AudioToolkit
+from data import AudioToolkit
 
 
-def visualize(root_path, checkpoint_path, dvector_config_path,
-              toolkit_config_path, result_path):
+def parse_args():
+    """Parse command-line arguments."""
+    parser = ArgumentParser()
+    parser.add_argument("data_dirs", type=str, nargs="+")
+    parser.add_argument("-c", "--checkpoint_path", required=True)
+    parser.add_argument("-o", "--output_path", required=True)
+    return vars(parser.parse_args())
+
+
+def path_to_mel(audio_path, speaker_name):
+    """Path to wav, wav to mel."""
+    wav = AudioToolkit.preprocess_wav(audio_path)
+    mel = AudioToolkit.wav_to_logmel(wav)
+    return speaker_name, mel
+
+
+def visualize(data_dirs, checkpoint_path, output_path):
     """Visualize high-dimensional embeddings using t-SNE."""
 
-    ckpt = torch.load(checkpoint_path)
-    dvector = DVector.load_config_file(dvector_config_path).cuda()
-    dvector.load_state_dict(ckpt["state_dict"])
-    dvector.eval()
-    audiotk = AudioToolkit.load_config_file(toolkit_config_path)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    uttrs = []
-    sids = []
-
-    spkr_ids = [entry for entry in listdir(root_path)]
-    spkr_paths = [join_path(root_path, spkr) for spkr in spkr_ids]
-
-    for spkr_id, spkr_path in zip(spkr_ids, spkr_paths):
-
-        uttr_paths = librosa.util.find_files(spkr_path)
-
-        with torch.no_grad():
-            specs = [audiotk.file_to_mel_ndarray(u) for u in uttr_paths]
-
-        uttrs += specs
-        sids += [spkr_id] * len(specs)
-
-    print("[INFO] utterances loaded.")
+    dvector = torch.jit.load(checkpoint_path).eval().to(device)
 
     print("[INFO] model loaded.")
 
+    executor = ProcessPoolExecutor(max_workers=cpu_count())
+    futures = []
+
+    n_spkrs = 0
+
+    for data_dir in data_dirs:
+        data_dir_path = Path(data_dir)
+        for spkr_dir in [x for x in data_dir_path.iterdir() if x.is_dir()]:
+            n_spkrs += 1
+            audio_paths = find_files(spkr_dir)
+            spkr_name = spkr_dir.name
+            for audio_path in audio_paths:
+                futures.append(executor.submit(path_to_mel, audio_path, spkr_name))
+
+    mels, spkr_names = [], []
+
+    for future in tqdm(futures, ncols=0, desc="Processing utterances"):
+        spkr_name, mel = future.result()
+        mels.append(mel)
+        spkr_names.append(spkr_name)
+
     embs = []
 
-    for uttr in uttrs:
-        uttr_tensor = torch.from_numpy(uttr).unsqueeze(0).cuda()
-        emb = dvector(uttr_tensor).squeeze()
-        emb = emb.detach().cpu().numpy()
+    for mel in tqdm(mels, ncols=0, desc="Converting to embeddings"):
+        mel_tensor = torch.FloatTensor(mel).to(device)
+        with torch.no_grad():
+            emb = dvector.embed_utterance(mel_tensor)
+            emb = emb.detach().cpu().numpy()
         embs.append(emb)
-
-    print("[INFO] utterances converted to embeddings.")
 
     tsne = TSNE(n_components=2, verbose=1, perplexity=40, n_iter=300)
     transformed = tsne.fit_transform(embs)
@@ -64,7 +81,7 @@ def visualize(root_path, checkpoint_path, dvector_config_path,
     data = {
         "dim-1": transformed[:, 0],
         "dim-2": transformed[:, 1],
-        "label": sids,
+        "label": spkr_names,
     }
 
     plt.figure()
@@ -72,30 +89,13 @@ def visualize(root_path, checkpoint_path, dvector_config_path,
         x="dim-1",
         y="dim-2",
         hue="label",
-        palette=sns.color_palette(n_colors=len(spkr_ids)),
+        palette=sns.color_palette(n_colors=n_spkrs),
         data=data,
-        legend="full"
+        legend="full",
     )
-    plt.savefig(result_path)
-
-
-def parse_args():
-    """Parse command-line arguments."""
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument("root_path", type=str,
-                        help="path to root directory of speaker directories")
-    parser.add_argument("checkpoint_path", type=str,
-                        help="path to saved model")
-    parser.add_argument("dvector_config_path", type=str,
-                        help="path to dvector configuration")
-    parser.add_argument("toolkit_config_path", type=str,
-                        help="path to toolkit configuration")
-    parser.add_argument("result_path", type=str,
-                        help="path to save plotted result")
-
-    return parser.parse_args()
+    plt.savefig(output_path)
 
 
 if __name__ == "__main__":
-    visualize(**vars(parse_args()))
+    filterwarnings("ignore")
+    visualize(**parse_args())

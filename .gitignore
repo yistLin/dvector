@@ -5,3 +5,4 @@
 *.npz
 runs
 model-*
+metadata.json

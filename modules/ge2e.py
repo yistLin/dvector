@@ -7,7 +7,7 @@ import torch.nn.functional as F
 
 
 class GE2ELoss(nn.Module):
-    """Implementation of the GE2E loss in https://arxiv.org/abs/1710.10467 [1]
+    """Implementation of the GE2E loss in https://arxiv.org/abs/1710.10467
 
     Accepts an input of size (N, M, D)
 
@@ -16,21 +16,21 @@ class GE2ELoss(nn.Module):
         and D is the dimensionality of the embedding vector (e.g. d-vector)
 
     Args:
-        - init_w (float): the initial value of w in Equation (5) of [1]
-        - init_b (float): the initial value of b in Equation (5) of [1]
+        - init_w (float): the initial value of w in Equation (5)
+        - init_b (float): the initial value of b in Equation (5)
     """
 
-    def __init__(self, init_w=10.0, init_b=-5.0, loss_method='softmax'):
+    def __init__(self, init_w=10.0, init_b=-5.0, loss_method="softmax"):
         super(GE2ELoss, self).__init__()
-        self.w = nn.Parameter(torch.tensor(init_w))
-        self.b = nn.Parameter(torch.tensor(init_b))
+        self.w = nn.Parameter(torch.FloatTensor([init_w]))
+        self.b = nn.Parameter(torch.FloatTensor([init_b]))
         self.loss_method = loss_method
 
-        assert self.loss_method in ['softmax', 'contrast']
+        assert self.loss_method in ["softmax", "contrast"]
 
-        if self.loss_method == 'softmax':
+        if self.loss_method == "softmax":
             self.embed_loss = self.embed_loss_softmax
-        if self.loss_method == 'contrast':
+        if self.loss_method == "contrast":
             self.embed_loss = self.embed_loss_contrast
 
     def cosine_similarity(self, dvecs):
@@ -45,7 +45,7 @@ class GE2ELoss(nn.Module):
         ctrd_expns = ctrd_expns.reshape(-1, d_embd)
 
         dvec_rolls = torch.cat([dvecs[:, 1:, :], dvecs[:, :-1, :]], dim=1)
-        dvec_excls = dvec_rolls.unfold(1, n_uttr-1, 1)
+        dvec_excls = dvec_rolls.unfold(1, n_uttr - 1, 1)
         mean_excls = dvec_excls.mean(dim=-1).reshape(-1, d_embd)
 
         indices = _indices_to_replace(n_spkr, n_uttr).to(dvecs.device)
@@ -70,9 +70,13 @@ class GE2ELoss(nn.Module):
             for i in range(M):
                 centroids_sigmoids = torch.sigmoid(cos_sim_matrix[j, i])
                 excl_centroids_sigmoids = torch.cat(
-                    (centroids_sigmoids[:j], centroids_sigmoids[j+1:]))
-                L_row.append(1. - torch.sigmoid(cos_sim_matrix[j, i, j]) +
-                             torch.max(excl_centroids_sigmoids))
+                    (centroids_sigmoids[:j], centroids_sigmoids[j + 1 :])
+                )
+                L_row.append(
+                    1.0
+                    - torch.sigmoid(cos_sim_matrix[j, i, j])
+                    + torch.max(excl_centroids_sigmoids)
+                )
             L_row = torch.stack(L_row)
             L.append(L_row)
         return torch.stack(L)
@@ -88,6 +92,7 @@ class GE2ELoss(nn.Module):
 
 @lru_cache(maxsize=5)
 def _indices_to_replace(n_spkr, n_uttr):
-    indices = [(s * n_uttr + u) * n_spkr + s
-               for s in range(n_spkr) for u in range(n_uttr)]
+    indices = [
+        (s * n_uttr + u) * n_spkr + s for s in range(n_spkr) for u in range(n_uttr)
+    ]
     return torch.LongTensor(indices)

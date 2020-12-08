@@ -1,4 +1,0 @@
-num_layers: 3
-dim_input: 40
-dim_cell: 768
-dim_emb: 256

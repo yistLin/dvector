@@ -1,38 +1,54 @@
 """Build a model for d-vector speaker embedding."""
 
-import yaml
+import torch
 import torch.nn as nn
+from torch import Tensor
 
 
 class DVector(nn.Module):
     """d-vector network"""
 
-    def __init__(self, num_layers=3, dim_input=80, dim_cell=768, dim_emb=256):
+    def __init__(
+        self, num_layers=3, dim_input=40, dim_cell=768, dim_emb=256, seg_len=160,
+    ):
         super(DVector, self).__init__()
 
-        self.lstm = nn.LSTM(input_size=dim_input,
-                            hidden_size=dim_cell,
-                            num_layers=num_layers,
-                            batch_first=True)
+        self.lstm = nn.LSTM(dim_input, dim_cell, num_layers, batch_first=True)
         self.embedding = nn.Linear(dim_cell, dim_emb)
+        self.seg_len = seg_len
 
-    @classmethod
-    def load_config_file(cls, config_path):
-        """Init with given config."""
+    def forward(self, inputs: Tensor):
+        """Forward a batch through network.
 
-        with open(config_path) as config_file:
-            configs = yaml.load(config_file, Loader=yaml.FullLoader)
+        Args:
+            inputs: (batch, seg_len, mel_dim)
 
-        return cls(**configs)
+        Returns:
+            embeds: (batch, emb_dim)
+        """
+        lstm_outs, _ = self.lstm(inputs)  # (batch, seg_len, emb_dim)
+        embeds = self.embedding(lstm_outs[:, -1, :])  # (batch, emb_dim)
+        embeds = embeds.div(embeds.norm(p=2, dim=-1, keepdim=True))
+        return embeds
 
-    def forward(self, x):
-        """Forward data through network."""
+    @torch.jit.export
+    def embed_utterance(self, utterance: Tensor):
+        """Embed an utterance by segmentation and averaging
 
-        self.lstm.flatten_parameters()
+        Args:
+            utterance: (uttr_len, mel_dim)
 
-        lstm_out, _ = self.lstm(x)
-        embeds = self.embedding(lstm_out[:, -1, :])
-        norm = embeds.norm(p=2, dim=-1, keepdim=True)
-        embeds_normalized = embeds.div(norm)
+        Returns:
+            embed: (emb_dim)
+        """
+        assert utterance.ndim == 2
 
-        return embeds_normalized
+        if utterance.size(1) <= self.seg_len:
+            embed = self.forward(utterance.unsqueeze(0)).squeeze(0)
+        else:
+            segments = utterance.unfold(0, self.seg_len, self.seg_len // 2)
+            embeds = self.forward(segments)
+            embed = embeds.mean(dim=0)
+            embed = embed.div(embed.norm(p=2, dim=-1, keepdim=True))
+
+        return embed

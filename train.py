@@ -1,151 +1,163 @@
-#!python
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """Train d-vector."""
 
-import argparse
+import json
+from argparse import ArgumentParser
+from itertools import count
+from pathlib import Path
+from multiprocessing import cpu_count
+from datetime import datetime
 
-import os
 import tqdm
 import torch
 from torch.optim import SGD
 from torch.optim.lr_scheduler import StepLR
 from torch.utils.data import DataLoader, random_split
+from torch.utils.tensorboard import SummaryWriter
 
-from tensorboardX import SummaryWriter
-
-from modules.se_dataset import SEDataset, pad_batch
-from modules.dvector import DVector
-from modules.ge2e import GE2ELoss
+from data import GE2EDataset, pad_batch
+from modules import DVector, GE2ELoss
 
 
 def parse_args():
     """Parse command-line arguments."""
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument("train_dir", type=str,
-                        help="path to directory of training data.")
-    parser.add_argument("model_dir", type=str,
-                        help="path to directory for saving checkpoints")
-    parser.add_argument("config_path", type=str,
-                        help="path to configuration of dvector")
-    parser.add_argument("-c", "--checkpoint_path", type=str, default=None,
-                        help="path to load saved checkpoint")
-    parser.add_argument("-i", "--n_steps", type=int, default=1000000,
-                        help="total # of steps")
-    parser.add_argument("-s", "--save_every", type=int, default=10000,
-                        help="save model every [save_every] steps")
-    parser.add_argument("-t", "--test_every", type=int, default=1000,
-                        help="test on validation set every [test_every] steps")
-    parser.add_argument("-d", "--decay_every", type=int, default=100000,
-                        help="decay learning rate every [decay_every] steps")
-    parser.add_argument("-n", "--n_speakers", type=int, default=32,
-                        help="# of speakers per batch")
-    parser.add_argument("-m", "--n_utterances", type=int, default=5,
-                        help="# of utterances per speaker")
-    parser.add_argument("-l", "--seg_len", type=int, default=128,
-                        help="length of the segment of an utterance")
-
-    return parser.parse_args()
+    parser = ArgumentParser()
+    parser.add_argument("data_dir", type=str)
+    parser.add_argument("model_dir", type=str)
+    parser.add_argument("-n", "--n_speakers", type=int, default=64)
+    parser.add_argument("-m", "--n_utterances", type=int, default=10)
+    parser.add_argument("--seg_len", type=int, default=160)
+    parser.add_argument("--save_every", type=int, default=10000)
+    parser.add_argument("--valid_every", type=int, default=1000)
+    parser.add_argument("--decay_every", type=int, default=100000)
+    parser.add_argument("--batch_per_valid", type=int, default=10)
+    parser.add_argument("--n_workers", type=int, default=cpu_count())
+    return vars(parser.parse_args())
 
 
-def train(train_dir, model_dir, config_path, checkpoint_path,
-          n_steps, save_every, test_every, decay_every,
-          n_speakers, n_utterances, seg_len):
+def infinite_iterator(dataloader):
+    """Infinitely yield a batch of data."""
+    while True:
+        for batch in iter(dataloader):
+            yield batch
+
+
+def train(
+    data_dir,
+    model_dir,
+    n_speakers,
+    n_utterances,
+    seg_len,
+    save_every,
+    valid_every,
+    decay_every,
+    batch_per_valid,
+    n_workers,
+):
     """Train a d-vector network."""
 
-    # setup
-    total_steps = 0
+    # read and log training infos
+    start_time = datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
+    checkpoints_path = Path(model_dir) / "checkpoints" / start_time
+    checkpoints_path.mkdir(parents=True, exist_ok=True)
+    writer = SummaryWriter(Path(model_dir) / "logs" / start_time)
+    with open(Path(data_dir, "metadata.json"), "r") as f:
+        metadata = json.load(f)
 
-    # load data
-    dataset = SEDataset(train_dir, n_utterances, seg_len)
-    train_set, valid_set = random_split(dataset, [len(dataset)-2*n_speakers,
-                                                  2*n_speakers])
-    train_loader = DataLoader(train_set, batch_size=n_speakers,
-                              shuffle=True, num_workers=4,
-                              collate_fn=pad_batch, drop_last=True)
-    valid_loader = DataLoader(valid_set, batch_size=n_speakers,
-                              shuffle=True, num_workers=4,
-                              collate_fn=pad_batch, drop_last=True)
-    train_iter = iter(train_loader)
+    # create data loader, iterator
+    dataset = GE2EDataset(data_dir, metadata["speakers"], n_utterances, seg_len)
+    trainset, validset = random_split(dataset, [len(dataset) - n_speakers, n_speakers])
+    train_loader = DataLoader(
+        trainset,
+        batch_size=n_speakers,
+        shuffle=True,
+        num_workers=n_workers,
+        collate_fn=pad_batch,
+        drop_last=True,
+    )
+    valid_loader = DataLoader(
+        validset,
+        batch_size=n_speakers,
+        num_workers=n_workers,
+        collate_fn=pad_batch,
+        drop_last=True,
+    )
+    train_iter = infinite_iterator(train_loader)
+    valid_iter = infinite_iterator(valid_loader)
 
-    assert len(train_set) >= n_speakers
-    assert len(valid_set) >= n_speakers
-    print(f"Training starts with {len(train_set)} speakers. "
-          f"(and {len(valid_set)} speakers for validation)")
+    assert len(trainset) >= n_speakers
+    assert len(validset) >= n_speakers
+    print(
+        f"Training starts with {len(trainset)} speakers. "
+        f"(and {len(validset)} speakers for validation)"
+    )
 
     # build network and training tools
-    dvector = DVector().load_config_file(config_path)
-    criterion = GE2ELoss()
-    optimizer = SGD(list(dvector.parameters()) +
-                    list(criterion.parameters()), lr=0.01)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    dvector = DVector(dim_input=metadata["n_mels"], seg_len=seg_len,).to(device)
+    dvector = torch.jit.script(dvector)
+    criterion = GE2ELoss().to(device)
+    optimizer = SGD(list(dvector.parameters()) + list(criterion.parameters()), lr=0.01)
     scheduler = StepLR(optimizer, step_size=decay_every, gamma=0.5)
 
-    # load checkpoint
-    if checkpoint_path is not None:
-        ckpt = torch.load(checkpoint_path)
-        total_steps = ckpt["total_steps"]
-        dvector.load_state_dict(ckpt["state_dict"])
-        criterion.load_state_dict(ckpt["criterion"])
-        optimizer.load_state_dict(ckpt["optimizer"])
-        scheduler.load_state_dict(ckpt["scheduler"])
-
-    # prepare for training
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    dvector = dvector.to(device)
-    criterion = criterion.to(device)
-    writer = SummaryWriter(model_dir)
-    pbar = tqdm.trange(n_steps)
+    pbar = tqdm.tqdm(total=valid_every, ncols=0, desc="Train")
+    train_losses, valid_losses = [], []
 
     # start training
-    for step in pbar:
+    for step in count(start=1):
 
-        total_steps += 1
-
-        try:
-            batch = next(train_iter)
-        except StopIteration:
-            train_iter = iter(train_loader)
-            batch = next(train_iter)
-
-        embd = dvector(batch.to(device)).view(n_speakers, n_utterances, -1)
-
-        loss = criterion(embd)
+        batch = next(train_iter).to(device)
+        embds = dvector(batch).view(n_speakers, n_utterances, -1)
+        loss = criterion(embds)
 
         optimizer.zero_grad()
         loss.backward()
 
         grad_norm = torch.nn.utils.clip_grad_norm_(
-            list(dvector.parameters()) + list(criterion.parameters()), max_norm=3)
-        dvector.embedding.weight.grad.data *= 0.5
-        criterion.w.grad.data *= 0.01
-        criterion.b.grad.data *= 0.01
+            list(dvector.parameters()) + list(criterion.parameters()),
+            max_norm=3,
+            norm_type=2.0,
+        )
+        dvector.embedding.weight.grad *= 0.5
+        dvector.embedding.bias.grad *= 0.5
+        criterion.w.grad *= 0.01
+        criterion.b.grad *= 0.01
 
         optimizer.step()
         scheduler.step()
 
-        pbar.set_description(f"global = {total_steps}, loss = {loss:.4f}")
-        writer.add_scalar("Training loss", loss, total_steps)
-        writer.add_scalar("Gradient norm", grad_norm, total_steps)
+        train_losses.append(loss.item())
+        pbar.update(1)
+        pbar.set_postfix(step=step, loss=loss.item(), grad_norm=grad_norm.item())
 
-        if (step + 1) % test_every == 0:
-            batch = next(iter(valid_loader))
-            embd = dvector(batch.to(device)).view(n_speakers, n_utterances, -1)
-            loss = criterion(embd)
-            writer.add_scalar("validation loss", loss, total_steps)
+        if step % valid_every == 0:
+            pbar.close()
 
-        if (step + 1) % save_every == 0:
-            ckpt_path = os.path.join(model_dir, f"ckpt-{total_steps}.tar")
-            ckpt_dict = {
-                "total_steps": total_steps,
-                "state_dict": dvector.state_dict(),
-                "criterion": criterion.state_dict(),
-                "optimizer": optimizer.state_dict(),
-                "scheduler": scheduler.state_dict(),
-            }
-            torch.save(ckpt_dict, ckpt_path)
+            for _ in range(batch_per_valid):
+                batch = next(valid_iter).to(device)
 
-    print("Training completed.")
+                with torch.no_grad():
+                    embd = dvector(batch).view(n_speakers, n_utterances, -1)
+                    loss = criterion(embd)
+                    valid_losses.append(loss.item())
+
+            avg_train_loss = sum(train_losses) / len(train_losses)
+            avg_valid_loss = sum(valid_losses) / len(valid_losses)
+            print(f"Valid: loss={avg_valid_loss:.1f}")
+
+            writer.add_scalar("Loss/train", avg_train_loss, step)
+            writer.add_scalar("Loss/valid", avg_valid_loss, step)
+
+            pbar = tqdm.tqdm(total=valid_every, ncols=0, desc="Train")
+            train_losses, valid_losses = [], []
+
+        if step % save_every == 0:
+            ckpt_path = checkpoints_path / f"dvector-step{step}.pt"
+            dvector.cpu()
+            dvector.save(str(ckpt_path))
+            dvector.to(device)
 
 
 if __name__ == "__main__":
-    train(**vars(parse_args()))
+    train(**parse_args())

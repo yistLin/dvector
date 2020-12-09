@@ -49,13 +49,15 @@ For more details, check the usage with `python train.py -h`.
 
 ### Visualize speaker embeddings
 
-You can embed utterances of several speakers, e.g.
+You can visualize speaker embeddings using a trained d-vector.
+Note that you have to structure speakers' directories in the same way as for preprocessing.
+e.g.
 
 ```bash
-python visualize.py <speakers_dir> -c dvector.pt -o tsne.jpg
+python visualize.py LibriSpeech/dev-clean -c dvector.pt -o tsne.jpg
 ```
 
-The dimension reduction result (using t-SNE) of some utterances from LibriSpeech.
+The following plot is the dimension reduction result (using t-SNE) of some utterances from LibriSpeech.
 
 ![TSNE result](images/tsne.png)
 

@@ -64,4 +64,3 @@ The following plot is the dimension reduction result (using t-SNE) of some utter
 ## References
 
 - GE2E-Loss module: [cvqluu/GE2E-Loss](https://github.com/cvqluu/GE2E-Loss)
-- Audio preprocessing: [resemble-ai/Resemblyzer](https://github.com/resemble-ai/Resemblyzer)

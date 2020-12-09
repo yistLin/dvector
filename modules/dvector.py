@@ -15,8 +15,8 @@ class DVector(nn.Module):
         super(DVector, self).__init__()
 
         self.lstm = nn.LSTM(dim_input, dim_cell, num_layers, batch_first=True)
-        self.linear = nn.Linear(dim_cell, 1)
         self.embedding = nn.Linear(dim_cell, dim_emb)
+        self.linear = nn.Linear(dim_emb, 1)
         self.seg_len = seg_len
 
     def forward(self, inputs: Tensor):
@@ -28,12 +28,10 @@ class DVector(nn.Module):
         Returns:
             embeds: (batch, emb_dim)
         """
-        lstm_outs, _ = self.lstm(inputs)  # (batch, seg_len, emb_dim)
-        attn_weights = F.softmax(self.linear(lstm_outs).squeeze(-1), dim=-1).unsqueeze(
-            -1
-        )
-        embeds = torch.sum(lstm_outs * attn_weights, dim=1)
-        embeds = self.embedding(embeds)
+        lstm_outs, _ = self.lstm(inputs)  # (batch, seg_len, dim_cell)
+        embeds = torch.tanh(self.embedding(lstm_outs))  # (batch, seg_len, dim_emb)
+        attn_weights = F.softmax(self.linear(embeds), dim=1)
+        embeds = torch.sum(embeds * attn_weights, dim=1)
         embeds = embeds.div(embeds.norm(p=2, dim=-1, keepdim=True))
         return embeds
 

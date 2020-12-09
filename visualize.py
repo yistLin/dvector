@@ -93,6 +93,8 @@ def visualize(data_dirs, checkpoint_path, output_path):
         data=data,
         legend="full",
     )
+    plt.legend(loc="center left", bbox_to_anchor=(1, 0.5))
+    plt.tight_layout()
     plt.savefig(output_path)
 
 

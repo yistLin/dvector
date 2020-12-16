@@ -5,7 +5,9 @@ The original paper about GE2E loss could be found here: [Generalized End-to-End 
 
 ## Usage
 
-Since the d-vector is compiled with TorchScript, you can simply load and use the pretrained d-vector anywhere.
+You can download the pretrained models from: [Wiki - Pretrained Models](https://github.com/yistLin/dvector/wiki/Pretrained-Models).
+
+Since the models are compiled with TorchScript, you can simply load and use a pretrained d-vector anywhere.
 
 ```python
 import torch

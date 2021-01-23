@@ -1,8 +1,0 @@
-*.pkl
-*.pt
-*.pth
-*.npy
-*.npz
-runs
-model-*
-metadata.json

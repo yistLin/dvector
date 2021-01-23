@@ -2,94 +2,91 @@
 """Preprocess script"""
 
 import json
-from pathlib import Path
-from uuid import uuid4
 from argparse import ArgumentParser
 from multiprocessing import cpu_count
-from concurrent.futures import ProcessPoolExecutor
+from pathlib import Path
+from typing import List
+from uuid import uuid4
+from warnings import filterwarnings
 
 import torch
-from tqdm import tqdm
+import torchaudio
 from librosa.util import find_files
+from torch.utils.data import DataLoader
+from tqdm import tqdm
 
-from data import AudioToolkit
-
-
-def parse_args():
-    """Parse command-line arguments."""
-    parser = ArgumentParser()
-    parser.add_argument("data_dirs", type=str, nargs="+")
-    parser.add_argument("-o", "--output_dir", required=True)
-    parser.add_argument("--n_workers", type=int, default=cpu_count())
-    return vars(parser.parse_args())
+from data import Wav2Mel
 
 
-def load_process_save(audio_path, output_dir_path, speaker_name):
-    """Load an audio file, process, and save object."""
+class PreprocessDataset(torch.utils.data.Dataset):
+    """Preprocess dataset."""
 
-    wav = AudioToolkit.preprocess_wav(audio_path)
+    def __init__(self, data_dirs: List[str], wav2mel):
+        self.wav2mel = wav2mel
+        self.speakers = set()
+        self.infos = []
 
-    if len(wav) < 10:
-        return speaker_name, None
+        for data_dir in data_dirs:
+            speaker_dir_paths = [x for x in Path(data_dir).iterdir() if x.is_dir()]
+            for speaker_dir_path in speaker_dir_paths:
+                audio_paths = find_files(speaker_dir_path)
+                speaker_name = speaker_dir_path.name
+                self.speakers.add(speaker_name)
+                for audio_path in audio_paths:
+                    self.infos.append((speaker_name, audio_path))
 
-    mel = AudioToolkit.wav_to_logmel(wav)
-    mel_tensor = torch.FloatTensor(mel)
+    def __len__(self):
+        return len(self.infos)
 
-    random_file_path = output_dir_path / f"uttr-{uuid4().hex}.pt"
-    torch.save(mel_tensor, random_file_path)
-
-    return (
-        speaker_name,
-        {
-            "feature_path": random_file_path.name,
-            "audio_path": audio_path,
-            "mel_len": len(mel),
-        },
-    )
+    def __getitem__(self, index):
+        speaker_name, audio_path = self.infos[index]
+        wav_tensor, sample_rate = torchaudio.load(audio_path)
+        mel_tensor = self.wav2mel(wav_tensor, sample_rate)
+        return speaker_name, mel_tensor
 
 
-def main(data_dirs, output_dir, n_workers):
+def preprocess(data_dirs, output_dir):
     """Preprocess audio files into features for training."""
 
     output_dir_path = Path(output_dir)
     output_dir_path.mkdir(parents=True, exist_ok=True)
 
-    executor = ProcessPoolExecutor(max_workers=n_workers)
-    futures = []
+    wav2mel = Wav2Mel()
+    wav2mel_jit = torch.jit.script(wav2mel)
+    sox_effects_jit = torch.jit.script(wav2mel.sox_effects)
+    log_melspectrogram_jit = torch.jit.script(wav2mel.log_melspectrogram)
+
+    wav2mel_jit.save(str(output_dir_path / "wav2mel.pt"))
+    sox_effects_jit.save(str(output_dir_path / "sox_effects.pt"))
+    log_melspectrogram_jit.save(str(output_dir_path / "log_melspectrogram.pt"))
+
+    dataset = PreprocessDataset(data_dirs, wav2mel_jit)
+    dataloader = DataLoader(dataset, batch_size=1, num_workers=cpu_count())
 
     infos = {
-        "n_mels": AudioToolkit.n_mels,
-        "speakers": {},
+        "n_mels": wav2mel.n_mels,
+        "speakers": {speaker_name: [] for speaker_name in dataset.speakers},
     }
 
-    for data_dir_path in data_dirs:
-        data_dir = Path(data_dir_path)
-        speaker_dirs = [x for x in data_dir.iterdir() if x.is_dir()]
-
-        for speaker_dir in speaker_dirs:
-            audio_paths = find_files(speaker_dir)
-
-            speaker_name = speaker_dir.name
-            infos["speakers"][speaker_name] = {
-                "speaker_dir_path": str(speaker_dir),
-                "utterances": [],
+    for speaker_name, mel_tensor in tqdm(dataloader, ncols=0, desc="Preprocess"):
+        speaker_name = speaker_name[0]
+        mel_tensor = mel_tensor.squeeze(0)
+        random_file_path = output_dir_path / f"uttr-{uuid4().hex}.pt"
+        torch.save(mel_tensor, random_file_path)
+        infos["speakers"][speaker_name].append(
+            {
+                "feature_path": random_file_path.name,
+                "mel_len": len(mel_tensor),
             }
-
-            for audio_path in audio_paths:
-                futures.append(
-                    executor.submit(
-                        load_process_save, audio_path, output_dir_path, speaker_name,
-                    )
-                )
-
-    for future in tqdm(futures, ncols=0):
-        speaker_name, utterance_info = future.result()
-        if utterance_info is not None:
-            infos["speakers"][speaker_name]["utterances"].append(utterance_info)
+        )
 
     with open(output_dir_path / "metadata.json", "w") as f:
         json.dump(infos, f, indent=2)
 
 
 if __name__ == "__main__":
-    main(**parse_args())
+    filterwarnings("ignore")
+    PARSER = ArgumentParser()
+    PARSER.add_argument("data_dirs", type=str, nargs="+")
+    PARSER.add_argument("-o", "--output_dir", type=str, required=True)
+    preprocess(**vars(PARSER.parse_args()))

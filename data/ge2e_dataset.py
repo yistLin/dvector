@@ -29,24 +29,25 @@ class GE2EDataset(Dataset):
         self.data_dir = data_dir
         self.n_utterances = n_utterances
         self.seg_len = seg_len
-        self.infos = [
-            [
-                uttr_info
-                for uttr_info in speaker_info["utterances"]
+        self.infos = []
+
+        for uttr_infos in speaker_infos.values():
+            feature_paths = [
+                uttr_info["feature_path"]
+                for uttr_info in uttr_infos
                 if uttr_info["mel_len"] > seg_len
             ]
-            for speaker_name, speaker_info in speaker_infos.items()
-            if len(speaker_info["utterances"]) > n_utterances
-        ]
+            if len(feature_paths) > n_utterances:
+                self.infos.append(feature_paths)
 
     def __len__(self):
         return len(self.infos)
 
     def __getitem__(self, index):
-        uttr_infos = random.sample(self.infos[index], self.n_utterances)
+        feature_paths = random.sample(self.infos[index], self.n_utterances)
         uttrs = [
-            torch.load(Path(self.data_dir, uttr_info["feature_path"]))
-            for uttr_info in uttr_infos
+            torch.load(Path(self.data_dir, feature_path))
+            for feature_path in feature_paths
         ]
         lefts = [random.randint(0, len(uttr) - self.seg_len) for uttr in uttrs]
         segments = [
@@ -55,7 +56,7 @@ class GE2EDataset(Dataset):
         return segments
 
 
-def pad_batch(batch):
-    """Pad a whole batch of utterances."""
+def collate_batch(batch):
+    """Collate a whole batch of utterances."""
     flatten = [u for s in batch for u in s]
     return pad_sequence(flatten, batch_first=True, padding_value=0)

@@ -9,7 +9,12 @@ class DVector(nn.Module):
     """d-vector network"""
 
     def __init__(
-        self, num_layers=3, dim_input=40, dim_cell=768, dim_emb=256, seg_len=160,
+        self,
+        num_layers=3,
+        dim_input=40,
+        dim_cell=768,
+        dim_emb=256,
+        seg_len=160,
     ):
         super(DVector, self).__init__()
 

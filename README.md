@@ -11,15 +11,14 @@ Since the models are compiled with TorchScript, you can simply load and use a pr
 
 ```python
 import torch
-from modules import AudioToolkit
+import torchaudio
 
-wav = AudioToolkit.preprocess_wav(audio_path)
-mel = AudioToolkit.wav_to_logmel(wav)
-mel = torch.FloatTensor(mel)
+wav2mel = torch.jit.load("wav2mel.pt")
+dvector = torch.jit.load("dvector.pt").eval()
 
-with torch.no_grad():
-    dvector = torch.jit.load(checkpoint_path).eval()
-    emb = dvector.embed_utterance(mel)
+wav_tensor, sample_rate = torchaudio.load("example.wav")
+mel_tensor = wav2mel(wav_tensor, sample_rate)
+emb_tensor = dvector.embed_utterance(mel_tensor)
 ```
 
 ## Train from scratch
@@ -37,6 +36,15 @@ And you can extract utterances from multiple **root directories**, e.g.
 ```bash
 python preprocess.py VoxCeleb1/dev LibriSpeech/train-clean-360 -o preprocessed
 ```
+
+If you need to modify some audio preprocessing hyperparameters, directly modify `data/wav2mel.py`.
+After preprocessing, 3 modules will be saved in the output directory:
+1. `wav2mel.pt`
+2. `sox_effects.pt`
+3. `log_melspectrogram.pt`
+
+> The first module `wav2mel.pt` is actually composed of the second and the third modules.
+> These modules were compiled with TorchScript and can be used anywhere to preprocess audio data.
 
 ### Train a model
 
@@ -56,7 +64,7 @@ Note that you have to structure speakers' directories in the same way as for pre
 e.g.
 
 ```bash
-python visualize.py LibriSpeech/dev-clean -c dvector.pt -o tsne.jpg
+python visualize.py LibriSpeech/dev-clean -w wav2mel.pt -c dvector.pt -o tsne.jpg
 ```
 
 The following plot is the dimension reduction result (using t-SNE) of some utterances from LibriSpeech.

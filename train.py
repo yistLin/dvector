@@ -18,7 +18,7 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
 from data import GE2EDataset, InfiniteDataLoader, collate_batch, infinite_iterator
-from modules import DVector, GE2ELoss
+from modules import AttentivePooledLSTMDvector, GE2ELoss
 
 
 def train(
@@ -32,18 +32,22 @@ def train(
     decay_every,
     batch_per_valid,
     n_workers,
+    comment,
 ):
     """Train a d-vector network."""
 
-    # read and log training infos
+    # setup job name
     start_time = datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
-    checkpoints_path = Path(model_dir) / "checkpoints" / start_time
+    job_name = f"{start_time}_{comment}" if comment is not None else start_time
+
+    # setup checkpoint and log dirs
+    checkpoints_path = Path(model_dir) / "checkpoints" / job_name
     checkpoints_path.mkdir(parents=True, exist_ok=True)
-    writer = SummaryWriter(Path(model_dir) / "logs" / start_time)
-    with open(Path(data_dir, "metadata.json"), "r") as f:
-        metadata = json.load(f)
+    writer = SummaryWriter(Path(model_dir) / "logs" / job_name)
 
     # create data loader, iterator
+    with open(Path(data_dir, "metadata.json"), "r") as f:
+        metadata = json.load(f)
     dataset = GE2EDataset(data_dir, metadata["speakers"], n_utterances, seg_len)
     trainset, validset = random_split(dataset, [len(dataset) - n_speakers, n_speakers])
     train_loader = InfiniteDataLoader(
@@ -63,16 +67,15 @@ def train(
     train_iter = infinite_iterator(train_loader)
     valid_iter = infinite_iterator(valid_loader)
 
+    # display training infos
     assert len(trainset) >= n_speakers
     assert len(validset) >= n_speakers
-    print(
-        f"Training starts with {len(trainset)} speakers. "
-        f"(and {len(validset)} speakers for validation)"
-    )
+    print(f"[INFO] Use {len(trainset)} speakers for training.")
+    print(f"[INFO] Use {len(validset)} speakers for validation.")
 
     # build network and training tools
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    dvector = DVector(
+    dvector = AttentivePooledLSTMDvector(
         dim_input=metadata["n_mels"],
         seg_len=seg_len,
     ).to(device)
@@ -81,9 +84,10 @@ def train(
     optimizer = SGD(list(dvector.parameters()) + list(criterion.parameters()), lr=0.01)
     scheduler = StepLR(optimizer, step_size=decay_every, gamma=0.5)
 
+    # record training infos
     pbar = tqdm(total=valid_every, ncols=0, desc="Train")
-    train_losses, valid_losses = [], []
     running_train_loss, running_grad_norm = deque(maxlen=100), deque(maxlen=100)
+    running_valid_loss = deque(maxlen=batch_per_valid)
 
     # start training
     for step in count(start=1):
@@ -108,7 +112,6 @@ def train(
         optimizer.step()
         scheduler.step()
 
-        train_losses.append(loss.item())
         running_train_loss.append(loss.item())
         running_grad_norm.append(grad_norm.item())
         avg_train_loss = sum(running_train_loss) / len(running_train_loss)
@@ -122,20 +125,16 @@ def train(
 
             for _ in range(batch_per_valid):
                 batch = next(valid_iter).to(device)
-
                 with torch.no_grad():
                     embd = dvector(batch).view(n_speakers, n_utterances, -1)
                     loss = criterion(embd)
-                    valid_losses.append(loss.item())
+                    running_valid_loss.append(loss.item())
 
-            avg_train_loss = sum(train_losses) / len(train_losses)
-            avg_valid_loss = sum(valid_losses) / len(valid_losses)
+            avg_valid_loss = sum(running_valid_loss) / len(running_valid_loss)
+
             tqdm.write(f"Valid: step={step}, loss={avg_valid_loss:.1f}")
-
             writer.add_scalar("Loss/train", avg_train_loss, step)
             writer.add_scalar("Loss/valid", avg_valid_loss, step)
-
-            train_losses, valid_losses = [], []
 
         if step % save_every == 0:
             ckpt_path = checkpoints_path / f"dvector-step{step}.pt"
@@ -154,6 +153,7 @@ if __name__ == "__main__":
     PARSER.add_argument("--save_every", type=int, default=10000)
     PARSER.add_argument("--valid_every", type=int, default=1000)
     PARSER.add_argument("--decay_every", type=int, default=100000)
-    PARSER.add_argument("--batch_per_valid", type=int, default=10)
+    PARSER.add_argument("--batch_per_valid", type=int, default=100)
     PARSER.add_argument("--n_workers", type=int, default=cpu_count())
+    PARSER.add_argument("--comment", type=str)
     train(**vars(PARSER.parse_args()))

@@ -35,6 +35,21 @@ Since all the modules are compiled with [TorchScript](https://pytorch.org/docs/s
 
 You can download them from the page of [*Releases*](https://github.com/yistLin/dvector/releases).
 
+## Evaluate model performance
+
+You can evaluate the performance of the model with equal error rate.
+For example, download the official test splits (`veri_test.txt` and `veri_test2.txt`) from [The VoxCeleb1 Dataset](https://www.robots.ox.ac.uk/~vgg/data/voxceleb/vox1.html) and run the following command: 
+```bash
+python equal_error_rate.py VoxCeleb1/test VoxCeleb1/test/veri_test.txt -w wav2mel.pt -c dvector.pt
+```
+
+So far, the released checkpoint was only trained on VoxCeleb1 without any data augmentation.
+Its performance on the official test splits of VoxCeleb1 are as following:
+| Test Split | Equal Error Rate | Threshold |
+| :-:        |:-:               |:-:        |
+| veri_test.txt  | 12.0% | 0.222 |
+| veri_test2.txt | 11.9% | 0.223 |
+
 ## Train from scratch
 
 ### Preprocess training data
@@ -89,7 +104,3 @@ python visualize.py LibriSpeech/dev-clean -w wav2mel.pt -c dvector.pt -o tsne.jp
 The following plot is the dimension reduction result (using t-SNE) of some utterances from LibriSpeech.
 
 ![TSNE result](images/tsne.png)
-
-## References
-
-- GE2E-Loss module: [cvqluu/GE2E-Loss](https://github.com/cvqluu/GE2E-Loss)

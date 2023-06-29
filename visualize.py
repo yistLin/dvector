@@ -51,7 +51,8 @@ def visualize(data_dirs, wav2mel_path, checkpoint_path, output_path):
             emb = dvector.embed_utterance(mel.to(device))
             emb = emb.detach().cpu().numpy()
         embs.append(emb)
-
+        
+    embs = np.array(emb)
     tsne = TSNE(n_components=2, verbose=1, perplexity=40, n_iter=300)
     transformed = tsne.fit_transform(embs)
 

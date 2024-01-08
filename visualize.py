@@ -6,6 +6,7 @@ from argparse import ArgumentParser
 from pathlib import Path
 from warnings import filterwarnings
 
+import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 import torch
@@ -52,7 +53,7 @@ def visualize(data_dirs, wav2mel_path, checkpoint_path, output_path):
             emb = emb.detach().cpu().numpy()
         embs.append(emb)
         
-    embs = np.array(emb)
+    embs = np.array(embs)
     tsne = TSNE(n_components=2, verbose=1, perplexity=40, n_iter=300)
     transformed = tsne.fit_transform(embs)
 
